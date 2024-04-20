@@ -1,6 +1,7 @@
 import time
 import requests
 import json
+import re
 
 import imdb
 
@@ -15,7 +16,7 @@ class MovieNotFoundException(Exception):
 
 def fetch_basics_from_imdb(query:str):
     """Given a search query, search imdb and return 
-    the id of the first result."""
+      the id of the first result."""
     movies = ia.search_movie(query)
     scraping_delay()
     try:
@@ -64,9 +65,9 @@ def generate_content_summary(imdb_id):
     
 def fetch_letterboxd(imdb_id):
     """Given an imdb id, go to the letterboxd page for that movie,
-    and return all the data, as a json."""
+      and return all the data, as a json."""
     page = requests.get(f"https://letterboxd.com/imdb/{imdb_id}")
-    time.sleep(1.5)
+    scraping_delay()
     lines = page.content.decode().split("\n")
     for i, line in enumerate(lines):
         if "<![CDATA[" in line:
@@ -74,7 +75,29 @@ def fetch_letterboxd(imdb_id):
             break
     return json.loads(json_line)
 
-def fetch_justwatch(imdb_id):
-    return {} #not implemented yet
+def fetch_justwatch(letterboxd_url):
+    """Given the url to the movie's letterboxd page,
+      fetch the JustWatch data, as a json,
+      via letterboxd.com (don't let the function name fool you).
+    The Letterboxd website seems to use your network info 
+      to determine the country to get data for,
+      which is pretty convenient.
+    """
+    film_name = letterboxd_url.rstrip("/").split("/")[-1]
+    url = f"https://letterboxd.com/csi/film/{film_name}/availability/"
+    page = requests.get(url)
+    scraping_delay()
+    lines = page.content.decode().split("\n")
+    data = {}
+    for line in lines:
+        if '<span class="options js-film-availability-options">' in line:
+            service = re.findall('<span class="name">(.+?)</span>', line)[0]
+            modalities = re.findall('<span class="extended">(.+?)</span>', line)
+            for m in modalities:
+                if m in data:
+                    data[m] += service,
+                else:
+                    data[m] = [service]
+    return data
 
 

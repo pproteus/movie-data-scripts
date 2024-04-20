@@ -77,8 +77,21 @@ def extract_imdb_parental_guide(imdb_id, query, data):
 def extract_letterboxd_data(imdb_id, query, data):
     print(f"Fetching Letterboxd info for '{data.get_value(query, "Title")}'")
     info = imdb_fetcher.fetch_letterboxd(imdb_id)
+    data.set_value(query, "Letterboxd URL", info["@id"])
     data.set_value(query, "Letterboxd Rating", info["aggregateRating"]["ratingValue"])
     data.set_value(query, "Letterboxd Count", info["aggregateRating"]["ratingCount"])
+
+def extract_justwatch_data(letterboxd_url, query, data):
+    print(f"Fetching availability info for '{data.get_value(query, "Title")}'")
+    info = imdb_fetcher.fetch_justwatch(letterboxd_url)
+    services_list = []
+    for i in (info.get("Play", []) + info.get("Rent", [])):
+        service = i.split(" ")[0]
+        if service not in services_list:
+            services_list += service,
+    justwatch_string = ", ".join(services_list)
+    data.set_value(query, "Available?", justwatch_string)
+
 
 def write_movie_csv(outfile, movies, moviedata, desired_colnames=None, skip_genres=None):
     """Function that manages creating/formatting the csv, assuming you have all the data already."""
@@ -87,8 +100,8 @@ def write_movie_csv(outfile, movies, moviedata, desired_colnames=None, skip_genr
             skip_genres = ["Short"]
         if desired_colnames is None:
             desired_colnames = ["Year", "Title", "Minutes", "IMDB Rating", "Letterboxd Rating",
-                            "Lead", "Objectionable Content", "Kind", 
-                            "Genres", "Plot", "IMDB Count", "Letterboxd Count"]
+                            "Lead", "Objectionable Content",
+                            "Genres", "Available?", "IMDB Count", "Letterboxd Count"]
 
         for col in desired_colnames:
             f.write(col)
@@ -105,7 +118,7 @@ def write_movie_csv(outfile, movies, moviedata, desired_colnames=None, skip_genr
             f.write("\n")
 
 
-def manage_movies(inputfile="test.txt", outfile=None, datafile="movies.json"):
+def manage_movies(inputfile="test.txt", outfile=None, datafile="movies.json", force_justwatch_update=False):
     """
     For each line in the inputfile, fetch all the various data for it, save that, and make a csv.
     This function is long because we're caching specific bits of information rather than the entirety of the incoming data.
@@ -120,6 +133,7 @@ def manage_movies(inputfile="test.txt", outfile=None, datafile="movies.json"):
                 imdb_id = data.get_value(query, "IMDB_ID")
                 if imdb_id == "":
                     perform_imdb_search(query, data)
+                    imdb_id = data.get_value(query, "IMDB_ID")
 
                 if data.get_value(query, "IMDB Rating") == "" or  data.get_value(query, "Kind") == "":
                     extract_imdb_main_data(imdb_id, query, data)
@@ -129,6 +143,10 @@ def manage_movies(inputfile="test.txt", outfile=None, datafile="movies.json"):
 
                 if data.get_value(query, "Letterboxd Rating") == "":
                     extract_letterboxd_data(imdb_id, query, data)
+
+                if data.get_value(query, "Available?") == "" or force_justwatch_update:
+                    letterboxd_url = data.get_value(query, "Letterboxd URL")
+                    extract_justwatch_data(letterboxd_url, query, data)
 
             except imdb_fetcher.MovieNotFoundException as e:
                 print(f"Error: {e} not found.")
@@ -153,7 +171,8 @@ if __name__ == "__main__":
     parser.add_argument("file", nargs="?", type=str, help="Input filepath")
     parser.add_argument("outfile", nargs="?", type=str, help="Output filepath")
     parser.add_argument("-j", "--datafile", type=str, default="movies.json", help="Database file to use/create")
-    parser.add_argument("-d", "--delete", type=str, help="Entry to delete from the database")
+    parser.add_argument("-d", "--delete", type=str, help="Query to delete from the database")
+    parser.add_argument("-f", "--justwatch", action="store_true", help="Flag to redownload all Justwatch data")
 
     args = parser.parse_args()
 
@@ -165,8 +184,8 @@ if __name__ == "__main__":
             args.file = input("Input filepath:  ")
             args.outfile = input("Output filepath:  ")
         if len(args.outfile) is None or len(args.outfile) < 2:
-            manage_movies(args.file, datafile=args.datafile)
+            manage_movies(args.file, datafile=args.datafile, force_justwatch_update=args.justwatch)
         else:
-            manage_movies(args.file, args.outfile, args.datafile)
+            manage_movies(args.file, args.outfile, args.datafile, force_justwatch_update=args.justwatch)
 
     
