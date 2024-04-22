@@ -32,8 +32,8 @@ def fetch_details_from_imdb(imdb_id):
     return data
 
 def generate_content_summary(imdb_id):
-    """Given an imdb id, return a personalized (for me, the author) string
-    summarizing imdb.com's "parental guide". """
+    """Given an imdb id, return a summary string
+    for imdb.com's "parental guide". """
     LOW_DATA_STRING = "Not enough data"
     complaint_list = []
     response = ia.get_movie_parents_guide(imdb_id)
@@ -62,18 +62,29 @@ def generate_content_summary(imdb_id):
         return "; ".join(complaint_list)
     else:
         return "Ok"
-    
-def fetch_letterboxd(imdb_id):
+
+def fetch_letterboxd_dictionary(letterboxd_url):
     """Given an imdb id, go to the letterboxd page for that movie,
       and return all the data, as a json."""
-    page = requests.get(f"https://letterboxd.com/imdb/{imdb_id}")
+    page = requests.get(letterboxd_url)
     scraping_delay()
     lines = page.content.decode().split("\n")
     for i, line in enumerate(lines):
         if "<![CDATA[" in line:
             json_line = lines[i+1]
-            break
-    return json.loads(json_line)
+        if "www.imdb.com" in line:
+            imdb_line = line
+    dict = json.loads(json_line)
+    dict["IMDB_ID"] = re.findall(r"tt(\d+)", imdb_line)[0]
+    return dict
+    
+def fetch_letterboxd_from_imdb_id(imdb_id):
+    url = f"https://letterboxd.com/imdb/{imdb_id}"
+    return fetch_letterboxd_dictionary(url)
+
+def fetch_letterboxd_from_page_string(page_string):
+    url = f"https://letterboxd.com/film/{page_string}/"
+    return fetch_letterboxd_dictionary(url)
 
 def fetch_justwatch(letterboxd_url):
     """Given the url to the movie's letterboxd page,
@@ -99,5 +110,3 @@ def fetch_justwatch(letterboxd_url):
                 else:
                     data[m] = [service]
     return data
-
-

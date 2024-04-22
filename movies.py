@@ -74,23 +74,42 @@ def extract_imdb_parental_guide(imdb_id, query, data):
     print(f"Fetching parental guide for '{data.get_value(query, "Title")}'")
     data.set_value(query, "Objectionable Content", imdb_fetcher.generate_content_summary(imdb_id))
 
-def extract_letterboxd_data(imdb_id, query, data):
-    print(f"Fetching Letterboxd info for '{data.get_value(query, "Title")}'")
-    info = imdb_fetcher.fetch_letterboxd(imdb_id)
+def extract_letterboxd_data(imdb_id, query, data, use_id=True):
+    """If use_id is true, find the page using the provided imdb id.
+    Otherwise, assume the query is the page string.
+    """
+    if use_id:
+        print(f"Fetching Letterboxd info for '{data.get_value(query, "Title")}'")
+        info = imdb_fetcher.fetch_letterboxd_from_imdb_id(imdb_id)
+    else:
+        print(f"Fetching Letterboxd info for '{query}'")
+        info = imdb_fetcher.fetch_letterboxd_from_page_string(query)
+        #and then we have to grab some extra data
+        data.set_value(query, "IMDB_ID", info["IMDB_ID"])
+        data.set_value(query, "Title", info["name"])
+        data.set_value(query, "Year", info["releasedEvent"][0]["startDate"])
+
     data.set_value(query, "Letterboxd URL", info["@id"])
     data.set_value(query, "Letterboxd Rating", info["aggregateRating"]["ratingValue"])
     data.set_value(query, "Letterboxd Count", info["aggregateRating"]["ratingCount"])
 
+
+
 def extract_justwatch_data(letterboxd_url, query, data):
     print(f"Fetching availability info for '{data.get_value(query, "Title")}'")
     info = imdb_fetcher.fetch_justwatch(letterboxd_url)
-    services_list = []
-    for i in (info.get("Play", []) + info.get("Rent", [])):
+    play_services = []
+    for i in info.get("Play", []):
         service = i.split(" ")[0]
-        if service not in services_list:
-            services_list += service,
-    justwatch_string = ", ".join(services_list)
-    data.set_value(query, "Available?", justwatch_string)
+        if service not in play_services:
+            play_services += service,
+    rent_services = []
+    for i in info.get("Rent", []):
+        service = i.split(" ")[0]
+        if service not in play_services and service not in rent_services:
+            rent_services += service,
+    data.set_value(query, "Stream?", ", ".join(play_services))
+    data.set_value(query, "Rent?", ", ".join(rent_services))
 
 
 def write_movie_csv(outfile, movies, moviedata, desired_colnames=None, skip_genres=None):
@@ -101,7 +120,8 @@ def write_movie_csv(outfile, movies, moviedata, desired_colnames=None, skip_genr
         if desired_colnames is None:
             desired_colnames = ["Year", "Title", "Minutes", "IMDB Rating", "Letterboxd Rating",
                             "Lead", "Objectionable Content",
-                            "Genres", "Available?", "IMDB Count", "Letterboxd Count"]
+                            "Genres", "Stream?", "Rent?", 
+                            "IMDB Count", "Letterboxd Count"]
 
         for col in desired_colnames:
             f.write(col)
@@ -118,7 +138,7 @@ def write_movie_csv(outfile, movies, moviedata, desired_colnames=None, skip_genr
             f.write("\n")
 
 
-def manage_movies(inputfile="test.txt", outfile=None, datafile="movies.json", force_justwatch_update=False):
+def manage_movies(inputfile="test.txt", outfile=None, requires_imdb_search=False, datafile="movies.json", force_justwatch_update=False):
     """
     For each line in the inputfile, fetch all the various data for it, save that, and make a csv.
     This function is long because we're caching specific bits of information rather than the entirety of the incoming data.
@@ -129,7 +149,12 @@ def manage_movies(inputfile="test.txt", outfile=None, datafile="movies.json", fo
     with open(inputfile, "r") as f:
         queries = [line.rstrip("\n").lower() for line in f] #preprocessing
         for query in queries:
+            if query == "": continue
             try:
+                if not requires_imdb_search: # we can fetch the ID directly without guessing
+                     if data.get_value(query, "IMDB_ID") == "" or data.get_value(query, "Letterboxd Rating") == "":
+                        extract_letterboxd_data("Dummy id string", query, data, use_id=False)
+
                 imdb_id = data.get_value(query, "IMDB_ID")
                 if imdb_id == "":
                     perform_imdb_search(query, data)
@@ -171,8 +196,9 @@ if __name__ == "__main__":
     parser.add_argument("file", nargs="?", type=str, help="Input filepath")
     parser.add_argument("outfile", nargs="?", type=str, help="Output filepath")
     parser.add_argument("-j", "--datafile", type=str, default="movies.json", help="Database file to use/create")
-    parser.add_argument("-d", "--delete", type=str, help="Query to delete from the database")
-    parser.add_argument("-f", "--justwatch", action="store_true", help="Flag to redownload all Justwatch data")
+    parser.add_argument("-d", "--delete", type=str, help="Querystring to delete from the database")
+    parser.add_argument("-f", "--justwatch", action="store_true", help="Flag to force redownload all Justwatch data")
+    parser.add_argument("-w", "--handwritten", action="store_true", help="Flag to use imdb search (when queries are not taken from letterboxd)")
 
     args = parser.parse_args()
 
@@ -184,8 +210,10 @@ if __name__ == "__main__":
             args.file = input("Input filepath:  ")
             args.outfile = input("Output filepath:  ")
         if len(args.outfile) is None or len(args.outfile) < 2:
-            manage_movies(args.file, datafile=args.datafile, force_justwatch_update=args.justwatch)
+            manage_movies(args.file, requires_imdb_search=args.handwritten, 
+                          datafile=args.datafile, force_justwatch_update=args.justwatch)
         else:
-            manage_movies(args.file, args.outfile, args.datafile, force_justwatch_update=args.justwatch)
+            manage_movies(args.file, args.outfile, requires_imdb_search=args.handwritten, 
+                          datafile=args.datafile, force_justwatch_update=args.justwatch)
 
     
