@@ -13,4 +13,12 @@ so if some the requests time out you can just run the function again and it will
 
 `py -m movies oscars2024.txt oscars2024.csv`
 
+or
+
+`py -m movies handwritten_movie_list.txt movie_list.csv -w`
+
+or just 
+
+`py -m movies --help`
+
 **Dependencies:** [imdb](https://cinemagoer.readthedocs.io/en/latest/)

@@ -74,7 +74,10 @@ def fetch_letterboxd_dictionary(letterboxd_url):
             json_line = lines[i+1]
         if "www.imdb.com" in line:
             imdb_line = line
-    dict = json.loads(json_line)
+    try:
+        dict = json.loads(json_line)
+    except UnboundLocalError:
+        raise MovieNotFoundException("Hint: Are you sure this input list wasnt handwritten?")
     dict["IMDB_ID"] = re.findall(r"tt(\d+)", imdb_line)[0]
     return dict
     
