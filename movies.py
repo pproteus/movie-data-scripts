@@ -61,10 +61,11 @@ def extract_imdb_main_data(imdb_id, query, data):
     data.set_value(query, "Minutes", info["runtimes"][0])
     data.set_value(query, "IMDB Rating", info["rating"])
     data.set_value(query, "IMDB Count", info["votes"])
-    try:
-        data.set_value(query, "Lead", info["cast"][0]["name"])
-    except KeyError:
-        data.set_value(query, "Lead", "Nobody") #some movies just don't have a cast
+    if data.get_value(query, "Lead") == "": #IMDB's cast ordering is not by billing order
+        try:
+            data.set_value(query, "Lead", info["cast"][0]["name"])
+        except KeyError:
+            data.set_value(query, "Lead", "Nobody") #some movies just don't have a cast
     data.set_value(query, "Genres", "-".join(info["genres"]))
     plot = info["plot"][0]
     data.set_value(query, "Plot", plot[:plot.find(" ", 60)] + "...")
@@ -92,6 +93,10 @@ def extract_letterboxd_data(imdb_id, query, data, use_id=True):
     data.set_value(query, "Letterboxd URL", info["@id"])
     data.set_value(query, "Letterboxd Rating", info["aggregateRating"]["ratingValue"])
     data.set_value(query, "Letterboxd Count", info["aggregateRating"]["ratingCount"])
+    try:
+        data.set_value(query, "Lead", info["actors"][0]["name"])
+    except KeyError:
+        data.set_value(query, "Lead", "Nobody") #some movies just don't have a cast
 
 
 
@@ -169,7 +174,7 @@ def manage_movies(inputfile="test.txt", outfile=None, requires_imdb_search=False
                 if data.get_value(query, "Letterboxd Rating") == "":
                     extract_letterboxd_data(imdb_id, query, data)
 
-                if data.get_value(query, "Available?") == "" or force_justwatch_update:
+                if force_justwatch_update or (data.get_value(query, "Stream?") == "" and data.get_value(query, "Rent?") == ""):
                     letterboxd_url = data.get_value(query, "Letterboxd URL")
                     extract_justwatch_data(letterboxd_url, query, data)
 
@@ -217,3 +222,7 @@ if __name__ == "__main__":
                           datafile=args.datafile, force_justwatch_update=args.justwatch)
 
     
+
+    ##Todo:
+    #how to get proper justwatch data?????
+    #"lead" isn't pulling the stars. Can I fix this?
