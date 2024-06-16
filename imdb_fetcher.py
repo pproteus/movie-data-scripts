@@ -89,13 +89,10 @@ def fetch_letterboxd_from_page_string(page_string):
     url = f"https://letterboxd.com/film/{page_string}/"
     return fetch_letterboxd_dictionary(url)
 
-def fetch_justwatch(letterboxd_url):
+def fetch_justwatch_from_letterboxd(letterboxd_url):
     """Given the url to the movie's letterboxd page,
-      fetch the JustWatch data, as a json,
-      via letterboxd.com (don't let the function name fool you).
-    The Letterboxd website seems to use your network info 
-      to determine the country to get data for,
-      which is pretty convenient.
+      visit the secret /csi page with useful info.
+      There we can ge the link to the correct JustWatch page.
     """
     film_name = letterboxd_url.rstrip("/").split("/")[-1]
     url = f"https://letterboxd.com/csi/film/{film_name}/availability/"
@@ -104,12 +101,36 @@ def fetch_justwatch(letterboxd_url):
     lines = page.content.decode().split("\n")
     data = {}
     for line in lines:
-        if '<span class="options js-film-availability-options">' in line:
-            service = re.findall('<span class="name">(.+?)</span>', line)[0]
-            modalities = re.findall('<span class="extended">(.+?)</span>', line)
-            for m in modalities:
-                if m in data:
-                    data[m] += service,
+        if "www.justwatch.com" in line:
+            justwatch_url = re.findall('<a href="(.+?)".*>JustWatch</a>', line)[0]
+    return fetch_justwatch(justwatch_url)
+
+def fetch_justwatch(justwatch_url):
+    """Scrapes a JustWatch url for a list of available services."""
+    data = {}
+    page = requests.get(justwatch_url)
+    scraping_delay()
+    lines = page.content.decode().split("\n")
+    try:
+        services_line = [line for line in lines if "<body" in line][0]
+        services_line = services_line[services_line.find("Watch Now") : services_line.find("We checked for updates")]
+        modality_pattern = 'buybox.*>(.+?)</label><div class='
+        type_pattern = 'alt="(.+?)"'
+        modalities_line = services_line.split("buybox-row ")[1:]
+        for m in modalities_line:
+            modality = re.findall(modality_pattern, m)[0].lstrip().rstrip()
+            print(modality)
+            services = re.findall(type_pattern, m)
+            for service in services:
+                if modality in data:
+                    if service not in data[modality]:
+                        data[modality] += service,
                 else:
-                    data[m] = [service]
-    return data
+                    data[modality] = [service]
+        return data
+    except Exception as e:
+        print("Justwatch website not formatted as expected")
+        raise e
+
+##TODO:
+#cache justwatch url

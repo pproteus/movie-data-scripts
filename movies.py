@@ -94,17 +94,22 @@ def extract_letterboxd_data(imdb_id, query, data, use_id=True):
     data.set_value(query, "Letterboxd Rating", info["aggregateRating"]["ratingValue"])
     data.set_value(query, "Letterboxd Count", info["aggregateRating"]["ratingCount"])
     try:
-        data.set_value(query, "Lead", info["actors"][0]["name"])
-    except KeyError:
+        if len(info["actors"]) == 0:
+            data.set_value(query, "Lead", "Nobody") #some movies just don't have a cast
+        elif len(info["actors"]) == 1:
+            data.set_value(query, "Lead", info["actors"][0]["name"])
+        else:
+            data.set_value(query, "Lead", f"{info["actors"][0]["name"]}, {info["actors"][1]["name"]}")
+    except (KeyError, IndexError):
         data.set_value(query, "Lead", "Nobody") #some movies just don't have a cast
 
 
 
 def extract_justwatch_data(letterboxd_url, query, data):
     print(f"Fetching availability info for '{data.get_value(query, "Title")}'")
-    info = imdb_fetcher.fetch_justwatch(letterboxd_url)
+    info = imdb_fetcher.fetch_justwatch_from_letterboxd(letterboxd_url)
     play_services = []
-    for i in info.get("Play", []):
+    for i in info.get("Stream", []):
         service = i.split(" ")[0]
         if service not in play_services:
             play_services += service,
@@ -222,7 +227,3 @@ if __name__ == "__main__":
                           datafile=args.datafile, force_justwatch_update=args.justwatch)
 
     
-
-    ##Todo:
-    #how to get proper justwatch data?????
-    #"lead" isn't pulling the stars. Can I fix this?
