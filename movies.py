@@ -42,6 +42,9 @@ class Data:
         if movie in self.data.keys():
             self.data.pop(movie)
             self.save()
+            print(f"Cache deleted: {movie}")
+        else:
+            print(f"No cache found to delete: {movie}")
 
     def get_all_keys(self):
         return {key for movie in self.data.values() for key in movie.keys()}
@@ -103,11 +106,14 @@ def extract_letterboxd_data(imdb_id, query, data, use_id=True):
     except (KeyError, IndexError):
         data.set_value(query, "Lead", "Nobody") #some movies just don't have a cast
 
+def extract_justwatch_url(letterboxd_url, query, data):
+    print(f"Finding JustWatch page for '{data.get_value(query, "Title")}'")
+    justwatch_url = imdb_fetcher.fetch_justwatch_url_from_letterboxd(letterboxd_url)
+    data.set_value(query, "JustWatch URL", justwatch_url)
 
-
-def extract_justwatch_data(letterboxd_url, query, data):
+def extract_justwatch_data(justwatch_url, query, data):
     print(f"Fetching availability info for '{data.get_value(query, "Title")}'")
-    info = imdb_fetcher.fetch_justwatch_from_letterboxd(letterboxd_url)
+    info = imdb_fetcher.fetch_justwatch(justwatch_url)
     play_services = []
     for i in info.get("Stream", []):
         service = i.split(" ")[0]
@@ -118,8 +124,10 @@ def extract_justwatch_data(letterboxd_url, query, data):
         service = i.split(" ")[0]
         if service not in play_services and service not in rent_services:
             rent_services += service,
-    data.set_value(query, "Stream?", ", ".join(play_services))
-    data.set_value(query, "Rent?", ", ".join(rent_services))
+    play_string = ", ".join(play_services) if len(play_services) else "."
+    rent_string = ", ".join(rent_services) if len(rent_services) else "."
+    data.set_value(query, "Stream?", play_string)
+    data.set_value(query, "Rent?", rent_string)
 
 
 def write_movie_csv(outfile, movies, moviedata, desired_colnames=None, skip_genres=None):
@@ -130,7 +138,7 @@ def write_movie_csv(outfile, movies, moviedata, desired_colnames=None, skip_genr
         if desired_colnames is None:
             desired_colnames = ["Year", "Title", "Minutes", "IMDB Rating", "Letterboxd Rating",
                             "Lead", "Objectionable Content",
-                            "Genres", "Stream?", "Rent?", 
+                            "Stream?", "Rent?", 
                             "IMDB Count", "Letterboxd Count"]
 
         for col in desired_colnames:
@@ -180,8 +188,12 @@ def manage_movies(inputfile="test.txt", outfile=None, requires_imdb_search=False
                     extract_letterboxd_data(imdb_id, query, data)
 
                 if force_justwatch_update or (data.get_value(query, "Stream?") == "" and data.get_value(query, "Rent?") == ""):
-                    letterboxd_url = data.get_value(query, "Letterboxd URL")
-                    extract_justwatch_data(letterboxd_url, query, data)
+                    justwatch_url = data.get_value(query, "JustWatch URL")
+                    if justwatch_url == "": #then we have to make an extra call to fetch it
+                        letterboxd_url = data.get_value(query, "Letterboxd URL")
+                        extract_justwatch_url(letterboxd_url, query, data)
+                        justwatch_url = justwatch_url = data.get_value(query, "JustWatch URL")
+                    extract_justwatch_data(justwatch_url, query, data)
 
             except imdb_fetcher.MovieNotFoundException as e:
                 print(f"Error: {e} not found.")

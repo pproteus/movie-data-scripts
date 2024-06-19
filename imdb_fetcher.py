@@ -20,7 +20,9 @@ def fetch_basics_from_imdb(query:str):
     movies = ia.search_movie(query)
     scraping_delay()
     try:
-        prohibited_kinds = ["tv series", "tv special", "tv mini series"]
+        prohibited_kinds = ["tv series", "tv special", "tv mini series", "tv movie", "video movie"]
+        #if you were hoping to search for a real tv movie, that's understandable, 
+        #but false positives are far less likely if these are excluded
         movies = [m for m in movies if m["kind"] not in prohibited_kinds]
         return movies[0]
     except IndexError:
@@ -64,8 +66,7 @@ def generate_content_summary(imdb_id):
         return "Ok"
 
 def fetch_letterboxd_dictionary(letterboxd_url):
-    """Given an imdb id, go to the letterboxd page for that movie,
-      and return all the data, as a json."""
+    "Return all letterboxd page data, as a json."
     page = requests.get(letterboxd_url)
     scraping_delay()
     lines = page.content.decode().split("\n")
@@ -77,11 +78,16 @@ def fetch_letterboxd_dictionary(letterboxd_url):
     try:
         dict = json.loads(json_line)
     except UnboundLocalError:
+        #if you pass a handwritten list as though it was a letterboxd list,
+        #this page will not be a proper movie page, but letterboxd may still handle it
+        #but there's not going to be proper data here so we have to stop.
         raise MovieNotFoundException("Hint: Are you sure this input list wasnt handwritten?")
     dict["IMDB_ID"] = re.findall(r"tt(\d+)", imdb_line)[0]
     return dict
     
 def fetch_letterboxd_from_imdb_id(imdb_id):
+    """Given an imdb id, go to the letterboxd page for that movie,
+      and return all the data, as a json."""
     url = f"https://letterboxd.com/imdb/{imdb_id}"
     return fetch_letterboxd_dictionary(url)
 
@@ -89,10 +95,10 @@ def fetch_letterboxd_from_page_string(page_string):
     url = f"https://letterboxd.com/film/{page_string}/"
     return fetch_letterboxd_dictionary(url)
 
-def fetch_justwatch_from_letterboxd(letterboxd_url):
+def fetch_justwatch_url_from_letterboxd(letterboxd_url):
     """Given the url to the movie's letterboxd page,
       visit the secret /csi page with useful info.
-      There we can ge the link to the correct JustWatch page.
+      There we can get the link to the correct JustWatch page.
     """
     film_name = letterboxd_url.rstrip("/").split("/")[-1]
     url = f"https://letterboxd.com/csi/film/{film_name}/availability/"
@@ -103,7 +109,7 @@ def fetch_justwatch_from_letterboxd(letterboxd_url):
     for line in lines:
         if "www.justwatch.com" in line:
             justwatch_url = re.findall('<a href="(.+?)".*>JustWatch</a>', line)[0]
-    return fetch_justwatch(justwatch_url)
+    return justwatch_url
 
 def fetch_justwatch(justwatch_url):
     """Scrapes a JustWatch url for a list of available services."""
@@ -114,12 +120,11 @@ def fetch_justwatch(justwatch_url):
     try:
         services_line = [line for line in lines if "<body" in line][0]
         services_line = services_line[services_line.find("Watch Now") : services_line.find("We checked for updates")]
-        modality_pattern = 'buybox.*>(.+?)</label><div class='
+        modality_pattern = 'buybox.*?>(.+?)</label><div class='
         type_pattern = 'alt="(.+?)"'
         modalities_line = services_line.split("buybox-row ")[1:]
         for m in modalities_line:
             modality = re.findall(modality_pattern, m)[0].lstrip().rstrip()
-            print(modality)
             services = re.findall(type_pattern, m)
             for service in services:
                 if modality in data:
@@ -132,5 +137,3 @@ def fetch_justwatch(justwatch_url):
         print("Justwatch website not formatted as expected")
         raise e
 
-##TODO:
-#cache justwatch url
