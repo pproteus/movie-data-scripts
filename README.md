@@ -1,11 +1,12 @@
 This is a collection of scripts that takes a list of movies, and populates a .csv of helpful information about those movies.
-Some functionality may be very tuned to my personal needs.
 
-There are two entry points, both designed to be accessible via command-line.
+There are two entry points, both accessible via command-line.
 - `movies.py` takes a .txt list of movie titles, searches imdb and other sites for data, and creates a .csv file.
 While this requires a lot of calls to the external websites, the results are cached they are downloaded,
-so if some the requests time out you can just run the function again and it will get straight to filling in the gaps.
+so if some of the requests time out you can simply run the function again and it will get straight to filling in the gaps.
 - `letterboxd_list_fetcher.py` takes a letterboxd.com list page, and converts it into a .txt compatible with the above.
+
+There is also an R shiny app, meant to make a couple kinds data visualizations on a created .csv file.
 
 **Sample usage:**
 
@@ -17,7 +18,7 @@ or
 
 `py -m movies handwritten_movie_list.txt movie_list.csv -w`
 
-or just 
+or just begin with
 
 `py -m movies --help`
 
