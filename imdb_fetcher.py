@@ -114,12 +114,16 @@ def fetch_justwatch_url_from_letterboxd(letterboxd_url):
 def fetch_justwatch(justwatch_url):
     """Scrapes a JustWatch url for a list of available services."""
     data = {}
-    page = requests.get(justwatch_url)
+    #despite not mentioning this on their robots.txt, justwatch 403s the default python-requests agent
+    page = requests.get(justwatch_url, headers={"User-Agent": "movie-data-scripts"})
     scraping_delay()
     lines = page.content.decode().split("\n")
     try:
-        services_line = [line for line in lines if "<body" in line][0]
+        #find the correct line in the page
+        services_line = [line for line in lines if "We checked for updates" in line][0]
+        #crop only the relevant part of that very long line
         services_line = services_line[services_line.find("Watch Now") : services_line.find("We checked for updates")]
+        #and then separate out each service
         modality_pattern = 'buybox.*?>(.+?)</label><div class='
         type_pattern = 'alt="(.+?)"'
         modalities_line = services_line.split("buybox-row ")[1:]
