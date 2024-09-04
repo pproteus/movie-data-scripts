@@ -115,7 +115,7 @@ def extract_justwatch_data(justwatch_url, query, data):
     print(f"Fetching availability info for '{data.get_value(query, "Title")}'")
     info = imdb_fetcher.fetch_justwatch(justwatch_url)
     play_services = []
-    for i in info.get("Stream", []):
+    for i in info.get("Subscription", []):
         service = i.split(" ")[0]
         if service not in play_services:
             play_services += service,
@@ -138,8 +138,8 @@ def write_movie_csv(outfile, movies, moviedata, desired_colnames=None, skip_genr
         if desired_colnames is None:
             desired_colnames = ["Year", "Title", "Minutes", "IMDB Rating", "Letterboxd Rating",
                             "Lead", "Objectionable Content",
-                            "Stream?", "Rent?", 
-                            "IMDB Count", "Letterboxd Count"]
+                            "Stream?", "Rent?",
+                            "IMDB Count", "Letterboxd Count", "Genres", "Plot", "Kind"]
 
         for col in desired_colnames:
             f.write(col)
@@ -168,6 +168,7 @@ def manage_movies(inputfile="test.txt", outfile=None, requires_imdb_search=False
         queries = [line.rstrip("\n").lower() for line in f] #preprocessing
         for query in queries:
             if query == "": continue
+            if query[:2] == "//": continue #these are comments
             try:
                 if not requires_imdb_search: # we can fetch the ID directly without guessing
                      if data.get_value(query, "IMDB_ID") == "" or data.get_value(query, "Letterboxd Rating") == "":
@@ -231,6 +232,7 @@ if __name__ == "__main__":
         if args.file is None:
             args.file = input("Input filepath:  ")
             args.outfile = input("Output filepath:  ")
+            args.handwritten = input("Type 'h' if list is handwritten, or anything else to continue  ").lower() == "h"
         if len(args.outfile) is None or len(args.outfile) < 2:
             manage_movies(args.file, requires_imdb_search=args.handwritten, 
                           datafile=args.datafile, force_justwatch_update=args.justwatch)

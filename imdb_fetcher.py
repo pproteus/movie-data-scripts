@@ -124,18 +124,14 @@ def fetch_justwatch(justwatch_url):
         #crop only the relevant part of that very long line
         services_line = services_line[services_line.find("Watch Now") : services_line.find("We checked for updates")]
         #and then separate out each service
-        modality_pattern = 'buybox.*?>(.+?)</label><div class='
-        type_pattern = 'alt="(.+?)"'
-        modalities_line = services_line.split("buybox-row ")[1:]
-        for m in modalities_line:
-            modality = re.findall(modality_pattern, m)[0].lstrip().rstrip()
-            services = re.findall(type_pattern, m)
-            for service in services:
-                if modality in data:
-                    if service not in data[modality]:
-                        data[modality] += service,
-                else:
-                    data[modality] = [service]
+        pattern = 'alt="(.*?)".*?class="offer__icon".*?class="offer__label__text".*?>(.*?)</p>'
+        service_modality_pairs = re.findall(pattern, services_line)
+        for service, modality in service_modality_pairs:
+            if modality in data:
+                if service not in data[modality]:
+                    data[modality] += service,
+            else:
+                data[modality] = [service]
         return data
     except Exception as e:
         print("Justwatch website not formatted as expected")
