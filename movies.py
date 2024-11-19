@@ -13,31 +13,49 @@ class Data:
                 self.save()    # make the file
         else:
             with open(filename, "r") as f:
-                self.data = json.load(f)
+                j = json.load(f)
+                self.data = {k: imdb_fetcher.Movie(**v) for k, v in j.items()}
 
     def save(self):
         with open(self.filename, "w") as f:
-            json.dump(self.data, f)
+            d = {k: v.asdict() for k, v in self.data.items()}
+            json.dump(d, f)
 
-    def set_value(self, movie, key, value):
-        if movie in self.data:
-            self.data[movie][key] = value
+    def add_info(self, query, movie, overwrite=True):
+        if query not in self.data:
+            self.data[query] = movie
         else:
-            self.data[movie] = {key: value}
+            self.data[query].merge(movie)
+        self.save()
 
-    def get_value(self, movie, key, as_num=False):
+    def get_value(self, movie, key, as_num=False, formatted=False):
+        if formatted:
+            formatting_function = imdb_fetcher.Movie.__dataclass_fields__.get(key, dict()).metadata.get("formatter", lambda x: x)
+            value = formatting_function(self.data.get(movie, imdb_fetcher.Movie()).__getattribute__(key))
+            if value is not None:
+                return str(value)
+            else:
+                return ""
+
         if as_num:
             try:
-                return float(self.data[movie][key])
+                return float(self.data[movie].__getattribute__(key))
             except KeyError:
                 return 0
             except ValueError:
                 return 0
+        else:
+            try:
+                s = self.data[movie].__getattribute__(key)
+                if s is not None:
+                    return s
+                else:
+                    return ""
+            except KeyError:
+                return ""
 
-        try:
-            return self.data[movie][key]
-        except KeyError:
-            return ""
+    def get_label(self, attr):
+        return imdb_fetcher.Movie.__dataclass_fields__.get(attr, dict()).metadata.get("label", attr)
 
     def delete_movie(self, movie):
         if movie in self.data.keys():
@@ -46,9 +64,6 @@ class Data:
             print(f"Cache deleted: {movie}")
         else:
             print(f"No cache found to delete: {movie}")
-
-    def get_all_keys(self):
-        return {key for movie in self.data.values() for key in movie.keys()}
 
 
 def perform_imdb_search(query, data):
@@ -60,110 +75,28 @@ def perform_imdb_search(query, data):
     data.set_value(query, "IMDB_ID", imdb_id)
 
 
-def extract_imdb_main_data(imdb_id, query, data):
-    print(f"Fetching film details for '{data.get_value(query, "Title")}'")
-    info = imdb_fetcher.fetch_details_from_imdb(imdb_id)
-    data.set_value(query, "Minutes", info["runtimes"][0])
-    data.set_value(query, "IMDB Rating", info["rating"])
-    data.set_value(query, "IMDB Count", info["votes"])
-    if data.get_value(query, "Lead") == "":    # IMDB's cast ordering is not by billing order
-        try:
-            data.set_value(query, "Lead", info["cast"][0]["name"])
-        except KeyError:
-            data.set_value(query, "Lead", "Nobody")    # some movies just don't have a cast
-    data.set_value(query, "Genres", "-".join(info["genres"]))
-    plot = info["plot"][0]
-    data.set_value(query, "Plot", plot[:plot.find(" ", 60)] + "...")
-    data.set_value(query, "Kind", info["kind"])
-
-
-def extract_imdb_parental_guide(imdb_id, query, data):
-    print(f"Fetching parental guide for '{data.get_value(query, "Title")}'")
-    data.set_value(query, "Objectionable Content", imdb_fetcher.generate_content_summary(imdb_id))
-
-
-def extract_letterboxd_data(imdb_id, query, data, use_id=True, url=None):
-    """ If there's a url provided, use that.
-    If use_id is true, find the page using the provided imdb id.
-    Otherwise, assume the query is the page string.
-    """
-    if url is not None:
-        print(f"Fetching Letterboxd info from '{url}'")
-        info = imdb_fetcher.fetch_letterboxd_dictionary(url)
-    elif use_id:
-        print(f"Fetching Letterboxd info for '{data.get_value(query, "Title")}'")
-        info = imdb_fetcher.fetch_letterboxd_from_imdb_id(imdb_id)
-    else:
-        print(f"Fetching Letterboxd info for '{query}'")
-        info = imdb_fetcher.fetch_letterboxd_from_page_string(query)
-
-    data.set_value(query, "Letterboxd URL", info["@id"])
-    data.set_value(query, "Letterboxd Rating", info["aggregateRating"]["ratingValue"])
-    data.set_value(query, "Letterboxd Count", info["aggregateRating"]["ratingCount"])
-
-    if data.get_value(query, "IMDB_ID") == "":    # then we have to grab some extra data
-        data.set_value(query, "IMDB_ID", info["IMDB_ID"])
-        data.set_value(query, "Title", info["name"])
-        data.set_value(query, "Year", info["releasedEvent"][0]["startDate"])
-
-    try:
-        if len(info["actors"]) == 0:
-            data.set_value(query, "Lead", "Nobody")    # some movies just don't have a cast
-        elif len(info["actors"]) == 1:
-            data.set_value(query, "Lead", info["actors"][0]["name"])
-        else:
-            data.set_value(query, "Lead", f"{info["actors"][0]["name"]}, {info["actors"][1]["name"]}")
-    except (KeyError, IndexError):
-        data.set_value(query, "Lead", "Nobody")    # some movies just don't have a cast
-
-
-def extract_justwatch_url(letterboxd_url, query, data):
-    print(f"Finding JustWatch page for '{data.get_value(query, "Title")}'")
-    justwatch_url = imdb_fetcher.fetch_justwatch_url_from_letterboxd(letterboxd_url)
-    data.set_value(query, "JustWatch URL", justwatch_url)
-
-
-def extract_justwatch_data(justwatch_url, query, data):
-    print(f"Fetching availability info for '{data.get_value(query, "Title")}'")
-    info = imdb_fetcher.fetch_justwatch(justwatch_url)
-    play_services = []
-    for i in info.get("Subscription", []):
-        service = i.split(" ")[0]
-        if service not in play_services:
-            play_services += service,
-    rent_services = []
-    for i in info.get("Rent", []):
-        service = i.split(" ")[0]
-        if service not in play_services and service not in rent_services:
-            rent_services += service,
-    play_string = ", ".join(play_services) if len(play_services) else "."
-    rent_string = ", ".join(rent_services) if len(rent_services) else "."
-    data.set_value(query, "Stream?", play_string)
-    data.set_value(query, "Rent?", rent_string)
-
-
 def write_movie_csv(outfile, movies, moviedata, desired_colnames=None, skip_genres=None):
     """Function that manages creating/formatting the csv, assuming you have all the data already."""
     with open(outfile, 'w', newline='', encoding='utf-8') as f:
         if skip_genres is None:   # if you want this to be empty, pass it the empty list, not None
             skip_genres = ["Short"]
         if desired_colnames is None:
-            desired_colnames = ["Year", "Title", "Minutes", "IMDB Rating", "Letterboxd Rating",
-                            "Lead", "Objectionable Content",
-                            "Stream?", "Rent?",
-                            "IMDB Count", "Letterboxd Count", "Genres", "Plot", "Kind"]
+            desired_colnames = ["year", "title", "runtime", "imdb_rating", "letterboxd_rating",
+                            "list_of_actors", "content_warning_dict",
+                            "justwatch_free", "justwatch_rent",
+                            "imdb_count", "letterboxd_count", "list_of_genres", "plot", "kind"]
 
         for col in desired_colnames:
-            f.write(col)
+            f.write(moviedata.get_label(col))
             f.write("\t")
         f.write("\n")
 
-        for movie in sorted(movies, key=lambda x: moviedata.get_value(x, "IMDB Count", as_num=True), reverse=True):
-            genres = moviedata.get_value(movie, "Genres")
+        for movie in sorted(movies, key=lambda x: moviedata.get_value(x, "imdb_count", as_num=True), reverse=True):
+            genres = moviedata.get_value(movie, "list_of_genres")
             if any([g in genres for g in skip_genres]):
                 continue
             for col in desired_colnames:
-                f.write(str(moviedata.get_value(movie, col)))
+                f.write(str(moviedata.get_value(movie, col, formatted=True)))
                 f.write("\t")
             f.write("\n")
 
@@ -171,8 +104,7 @@ def write_movie_csv(outfile, movies, moviedata, desired_colnames=None, skip_genr
 def manage_movies(inputfile="test.txt", outfile=None, requires_imdb_search=False, datafile="movies.json", force_justwatch_update=False):
     """
     For each line in the inputfile, fetch all the various data for it, save that, and make a csv.
-    This function is long because we're caching specific bits of information rather than the entirety of the incoming data.
-    The saved data is keyed via the query string.
+    This function is long because it's responsible for minimizing the number of outgoing calls.
     Networking errors should be handled gracefully by simply moving on to the next thing.
     """
     data = Data(datafile)
@@ -185,34 +117,31 @@ def manage_movies(inputfile="test.txt", outfile=None, requires_imdb_search=False
                 continue    # these are comments
             try:
                 if query[:23] == "https://letterboxd.com/":    # we can fetch the ID directly without guessing
-                    if data.get_value(query, "IMDB_ID") == "" or data.get_value(query, "Letterboxd Rating") == "":
-                        extract_letterboxd_data("Dummy id string", query, data, url=query)
-                    # override the query with ???
-                elif not requires_imdb_search:    # no guessing here either'
-                    if data.get_value(query, "IMDB_ID") == "" or data.get_value(query, "Letterboxd Rating") == "":
-                        extract_letterboxd_data("Dummy id string", query, data, use_id=False)
+                    if data.get_value(query, "imdb_id") == "" or data.get_value(query, "letterboxd_rating") == "":
+                        data.add_info(query, imdb_fetcher.fetch_letterboxd(query))
 
-                imdb_id = data.get_value(query, "IMDB_ID")
+                # not sure if I actually need this check?
+                # elif not requires_imdb_search:    # no guessing here either
+                #     if data.get_value(query, "imdb_id") == "" or data.get_value(query, "letterboxd_rating") == "":
+                #         extract_letterboxd_data("Dummy id string", query, data, use_id=False)
+
+                imdb_id = data.get_value(query, "imdb_id")
                 if imdb_id == "":
-                    perform_imdb_search(query, data)
-                    imdb_id = data.get_value(query, "IMDB_ID")
+                    raise NotImplementedError("No search function implemented")
 
-                if data.get_value(query, "IMDB Rating") == "" or data.get_value(query, "Kind") == "":
-                    extract_imdb_main_data(imdb_id, query, data)
+                if data.get_value(query, "imdb_rating") == "":
+                    data.add_info(query, imdb_fetcher.fetch_imdb(imdb_id))
 
-                if data.get_value(query, "Objectionable Content") == "":
-                    extract_imdb_parental_guide(imdb_id, query, data)
+                if data.get_value(query, "letterboxd_rating") == "":
+                    data.add_info(query, imdb_fetcher.fetch_letterboxd_from_imdb_id(imdb_id))
 
-                if data.get_value(query, "Letterboxd Rating") == "":
-                    extract_letterboxd_data(imdb_id, query, data)
-
-                if force_justwatch_update or (data.get_value(query, "Stream?") == "" and data.get_value(query, "Rent?") == ""):
-                    justwatch_url = data.get_value(query, "JustWatch URL")
+                if force_justwatch_update or (not len(data.get_value(query, "justwatch_free")) and not len(data.get_value(query, "justwatch_rent"))):
+                    justwatch_url = data.get_value(query, "justwatch_url")
                     if justwatch_url == "":   # then we have to make an extra call to fetch it
-                        letterboxd_url = data.get_value(query, "Letterboxd URL")
-                        extract_justwatch_url(letterboxd_url, query, data)
-                        justwatch_url = justwatch_url = data.get_value(query, "JustWatch URL")
-                    extract_justwatch_data(justwatch_url, query, data)
+                        letterboxd_url = data.get_value(query, "letterboxd_url")
+                        data.add_info(query, imdb_fetcher.fetch_justwatch_url_from_letterboxd(letterboxd_url))
+                        justwatch_url = data.get_value(query, "justwatch_url")
+                    data.add_info(query, imdb_fetcher.fetch_justwatch(justwatch_url))
 
             except imdb_fetcher.MovieNotFoundException as e:
                 print(f"Error: {e} not found.")

@@ -21,5 +21,3 @@ or
 or just begin with
 
 `py -m movies --help`
-
-**Dependencies:** [imdb](https://cinemagoer.readthedocs.io/en/latest/)
