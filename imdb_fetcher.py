@@ -82,8 +82,12 @@ class Movie:
                     self.__setattr__(k, v)
 
 
-def scraping_delay(seconds=1.5):
-    time.sleep(seconds)
+def scrape(url, delay_seconds=1.5):
+    print(f"Fetching data from {url}.")
+    page = requests.get(url, headers={"User-Agent": "movie-data-scripts"})
+    time.sleep(delay_seconds)
+    lines = page.content.decode().split("\n")
+    return lines
 
 
 class MovieNotFoundException(Exception):
@@ -93,28 +97,26 @@ class MovieNotFoundException(Exception):
 def fetch_imdb(imdb_id):
     """Scrapes imdb page for parents guide, ratings, and generic movie info."""
     url = f"https://www.imdb.com/title/tt{imdb_id}/parentalguide/"
-    print(f"Fetching data from {url}.")
-    page = requests.get(url, headers={"User-Agent": "movie-data-scripts"})
-    scraping_delay()
-    lines = page.content.decode().split("\n")
+    lines = scrape(url)
     line = [i for i in lines if "__NEXT_DATA__" in i][0]
     pattern = r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script><script>'
     data = json.loads(re.findall(pattern, line)[0])["props"]["pageProps"]["contentData"]["data"]["title"]
+
+    runtime = data["runtime"]["seconds"]//60 if data["runtime"] is not None else None
+    plot = data["plot"]["plotText"]["plainText"] if data["plot"] is not None else None
+
     return Movie(content_warning_dict={cat["category"]["id"]: {level["text"]: level["votedFor"] for level in cat["severityBreakdown"]}
                                        for cat in data["parentsGuide"]["categories"]},
-                 runtime=data["runtime"]["seconds"]//60, imdb_rating=data["ratingsSummary"]["aggregateRating"],
+                 runtime=runtime, imdb_rating=data["ratingsSummary"]["aggregateRating"],
                  imdb_count=data["ratingsSummary"]["voteCount"], list_of_genres=[g["genre"]["text"] for g in data["titleGenres"]["genres"]],
                  kind=data["titleType"]["text"], title=data["titleText"]["text"], year=data["releaseYear"]["year"],
-                 plot=data["plot"]["plotText"]["plainText"], director=data["directorsPageTitle"][0]["credits"][0]["name"]["nameText"]["text"],
+                 plot=plot, director=data["directorsPageTitle"][0]["credits"][0]["name"]["nameText"]["text"],
                  list_of_actors=[person["node"]["name"]["nameText"]["text"] for person in data["castPageTitle"]["edges"]])
 
 
 def fetch_letterboxd(letterboxd_url):
     "Return all letterboxd page data, as a json."
-    print(f"Fetching data from {letterboxd_url}.")
-    page = requests.get(letterboxd_url)
-    scraping_delay()
-    lines = page.content.decode().split("\n")
+    lines = scrape(letterboxd_url)
     for i, line in enumerate(lines):
         if "<![CDATA[" in line:
             info_line = lines[i+1]
@@ -130,11 +132,16 @@ def fetch_letterboxd(letterboxd_url):
         # this page will not be a proper movie page, but letterboxd may still handle it
         # but there's not going to be proper data here so we have to stop.
         raise MovieNotFoundException("Hint: Are you sure this input list wasn't handwritten?")
-    runtime = int(re.findall(r"runTime: (\d+)", runtime_line)[0])
 
-    return Movie(title=info["name"], kind=info["@type"], runtime=runtime, director=info["director"][0]["name"], year=int(info["releasedEvent"][0]["startDate"]),
-                 list_of_actors=[actor["name"] for actor in info["actors"]], list_of_genres=info["genre"], letterboxd_url=info["@id"], imdb_id=imdb_id,
-                 letterboxd_count=info["aggregateRating"]["ratingCount"], letterboxd_rating=info["aggregateRating"]["ratingValue"])
+    runtime = int(re.findall(r"runTime: (\d+)", runtime_line)[0])
+    rating = info["aggregateRating"]["ratingValue"] if "aggregateRating" in info else None
+    count = info["aggregateRating"]["ratingCount"] if "aggregateRating" in info else 0
+    director = info["director"][0]["name"] if "director" in info else None
+    actors = [actor["name"] for actor in info["actors"]] if "actors" in info else list()
+
+    return Movie(title=info["name"], kind=info["@type"], runtime=runtime, director=director, year=int(info["releasedEvent"][0]["startDate"]),
+                 list_of_actors=actors, list_of_genres=info.get("genre", list()), letterboxd_url=info["@id"],
+                 imdb_id=imdb_id, letterboxd_count=count, letterboxd_rating=rating)
 
 
 def fetch_letterboxd_from_imdb_id(imdb_id):
@@ -155,23 +162,20 @@ def fetch_justwatch_url_from_letterboxd(letterboxd_url):
       There we can get the link to the correct JustWatch page.
     """
     film_name = letterboxd_url.rstrip("/").split("/")[-1]
-    print(f"Fetching justwatch url from {letterboxd_url}")
     url = f"https://letterboxd.com/csi/film/{film_name}/availability/"
-    page = requests.get(url)
-    scraping_delay()
-    lines = page.content.decode().split("\n")
+    lines = scrape(url)
     for line in lines:
         if "www.justwatch.com" in line:
-            return Movie(justwatch_url=re.findall('<a href="(.+?)".*>JustWatch</a>', line)[0])
+            matches = re.findall('<a href="(.+?)".*>JustWatch</a>', line)
+            if len(matches):
+                return Movie(justwatch_url=matches[0])
+    return Movie()
 
 
 def fetch_justwatch(justwatch_url):
     """Scrapes a JustWatch url for a list of available services."""
     data = {"Subscription": [], "Rent": []}
-    print(f"Fetching data from {justwatch_url}.")
-    page = requests.get(justwatch_url, headers={"User-Agent": "movie-data-scripts"})
-    scraping_delay()
-    lines = page.content.decode().split("\n")
+    lines = scrape(justwatch_url, 4)
     try:
         # find the correct line in the page
         services_line = [line for line in lines if "We checked for updates" in line][0]
@@ -191,10 +195,3 @@ def fetch_justwatch(justwatch_url):
     except Exception as e:
         print("Justwatch website not formatted as expected")
         raise e
-
-
-if __name__ == "__main__":
-    # x = fetch_justwatch_url_from_letterboxd("https://letterboxd.com/film/being-there/")
-    x = fetch_justwatch('https://www.justwatch.com/ca/movie/biking-borders-eine-etwas-andere-reise')
-    # x = fetch_imdb('0078841')
-    print(x)

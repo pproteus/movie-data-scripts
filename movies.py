@@ -40,9 +40,7 @@ class Data:
         if as_num:
             try:
                 return float(self.data[movie].__getattribute__(key))
-            except KeyError:
-                return 0
-            except ValueError:
+            except (KeyError, ValueError, TypeError):
                 return 0
         else:
             try:
@@ -101,7 +99,7 @@ def write_movie_csv(outfile, movies, moviedata, desired_colnames=None, skip_genr
             f.write("\n")
 
 
-def manage_movies(inputfile="test.txt", outfile=None, requires_imdb_search=False, datafile="movies.json", force_justwatch_update=False):
+def manage_movies(inputfile="test.txt", outfile=None, requires_search=False, datafile="movies.json", force_justwatch_update=False):
     """
     For each line in the inputfile, fetch all the various data for it, save that, and make a csv.
     This function is long because it's responsible for minimizing the number of outgoing calls.
@@ -117,31 +115,31 @@ def manage_movies(inputfile="test.txt", outfile=None, requires_imdb_search=False
                 continue    # these are comments
             try:
                 if query[:23] == "https://letterboxd.com/":    # we can fetch the ID directly without guessing
-                    if data.get_value(query, "imdb_id") == "" or data.get_value(query, "letterboxd_rating") == "":
+                    if data.get_value(query, "imdb_id") == "" or data.get_value(query, "letterboxd_count") == "":
                         data.add_info(query, imdb_fetcher.fetch_letterboxd(query))
 
-                # not sure if I actually need this check?
-                # elif not requires_imdb_search:    # no guessing here either
-                #     if data.get_value(query, "imdb_id") == "" or data.get_value(query, "letterboxd_rating") == "":
-                #         extract_letterboxd_data("Dummy id string", query, data, use_id=False)
+                elif not requires_search:    # in this case, the query is the letterboxd string
+                    if data.get_value(query, "imdb_id") == "" or data.get_value(query, "letterboxd_count") == "":
+                        data.add_info(query, imdb_fetcher.fetch_letterboxd_from_page_string(query))
 
                 imdb_id = data.get_value(query, "imdb_id")
-                if imdb_id == "":
+                if imdb_id == "":      # then we probably need a search
                     raise NotImplementedError("No search function implemented")
 
-                if data.get_value(query, "imdb_rating") == "":
+                if data.get_value(query, "imdb_count") == "":
                     data.add_info(query, imdb_fetcher.fetch_imdb(imdb_id))
 
-                if data.get_value(query, "letterboxd_rating") == "":
+                if data.get_value(query, "letterboxd_count") == "":
                     data.add_info(query, imdb_fetcher.fetch_letterboxd_from_imdb_id(imdb_id))
 
-                if force_justwatch_update or (not len(data.get_value(query, "justwatch_free")) and not len(data.get_value(query, "justwatch_rent"))):
+                if force_justwatch_update or data.get_value(query, "justwatch_rent") == "":
                     justwatch_url = data.get_value(query, "justwatch_url")
                     if justwatch_url == "":   # then we have to make an extra call to fetch it
                         letterboxd_url = data.get_value(query, "letterboxd_url")
                         data.add_info(query, imdb_fetcher.fetch_justwatch_url_from_letterboxd(letterboxd_url))
                         justwatch_url = data.get_value(query, "justwatch_url")
-                    data.add_info(query, imdb_fetcher.fetch_justwatch(justwatch_url))
+                    if justwatch_url not in ("", "https://www.justwatch.com/"):     # the former means the url fetcher failed, the latter means it returned nothing
+                        data.add_info(query, imdb_fetcher.fetch_justwatch(justwatch_url))
 
             except imdb_fetcher.MovieNotFoundException as e:
                 print(f"Error: {e} not found.")
@@ -181,8 +179,8 @@ if __name__ == "__main__":
             args.outfile = input("Output filepath:  ")
             args.handwritten = input("Type 'h' if list is handwritten, or anything else to continue  ").lower() == "h"
         if args.outfile is None or len(args.outfile) < 2:
-            manage_movies(args.file, requires_imdb_search=args.handwritten,
+            manage_movies(args.file, requires_search=args.handwritten,
                           datafile=args.datafile, force_justwatch_update=args.justwatch)
         else:
-            manage_movies(args.file, args.outfile, requires_imdb_search=args.handwritten,
+            manage_movies(args.file, args.outfile, requires_search=args.handwritten,
                           datafile=args.datafile, force_justwatch_update=args.justwatch)
