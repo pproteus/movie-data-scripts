@@ -5,19 +5,25 @@ import imdb_fetcher
 
 
 class Data:
-    def __init__(self, filename="movies.json"):
-        self.filename = filename
-        if self.filename not in os.listdir():
-            with open(filename, "w") as f:
+    def __init__(self, filepath="resources/movies.json"):
+        self.filepath = filepath
+        if not os.path.exists(self.filepath):
+            with open(filepath, "w") as f:
                 self.data = {}
                 self.save()    # make the file
         else:
-            with open(filename, "r") as f:
+            with open(filepath, "r") as f:
                 j = json.load(f)
                 self.data = {k: imdb_fetcher.Movie(**v) for k, v in j.items()}
+        CONFIG_PATH = "resources/config.txt"
+        try:
+            with open(CONFIG_PATH, "r") as f:
+                self.config = json.load(f)
+        except (UnboundLocalError, json.decoder.JSONDecodeError):
+            raise UnboundLocalError(f'File "{CONFIG_PATH}" is supposed to be a json but is malformed.')
 
     def save(self):
-        with open(self.filename, "w") as f:
+        with open(self.filepath, "w") as f:
             d = {k: v.asdict() for k, v in self.data.items()}
             json.dump(d, f)
 
@@ -64,32 +70,28 @@ class Data:
             print(f"No cache found to delete: {movie}")
 
 
-def perform_imdb_search(query, data):
-    print(f"Searching imdb for '{query}'")
-    info = imdb_fetcher.fetch_basics_from_imdb(query)
-    data.set_value(query, "Title", info["title"])
-    data.set_value(query, "Year", info["year"])
-    imdb_id = info.movieID
-    data.set_value(query, "IMDB_ID", imdb_id)
+## I might want a reminder of this later when I replace it
+# def perform_imdb_search(query, data):
+#     print(f"Searching imdb for '{query}'")
+#     info = imdb_fetcher.fetch_basics_from_imdb(query)
+#     data.set_value(query, "Title", info["title"])
+#     data.set_value(query, "Year", info["year"])
+#     imdb_id = info.movieID
+#     data.set_value(query, "IMDB_ID", imdb_id)
 
 
-def write_movie_csv(outfile, movies, moviedata, desired_colnames=None, skip_genres=None):
+def write_movie_csv(outfile, queries, moviedata: Data):
     """Function that manages creating/formatting the csv, assuming you have all the data already."""
     with open(outfile, 'w', newline='', encoding='utf-8') as f:
-        if skip_genres is None:   # if you want this to be empty, pass it the empty list, not None
-            skip_genres = ["Short"]
-        if desired_colnames is None:
-            desired_colnames = ["year", "title", "runtime", "imdb_rating", "letterboxd_rating",
-                            "list_of_actors", "content_warning_dict",
-                            "justwatch_free", "justwatch_rent",
-                            "imdb_count", "letterboxd_count", "list_of_genres", "plot", "kind"]
+        skip_genres = moviedata.config["skip_genres"]
+        desired_colnames = moviedata.config["desired_colnames"]
 
         for col in desired_colnames:
             f.write(moviedata.get_label(col))
             f.write("\t")
         f.write("\n")
 
-        for movie in sorted(movies, key=lambda x: moviedata.get_value(x, "imdb_count", as_num=True), reverse=True):
+        for movie in sorted(queries, key=lambda x: moviedata.get_value(x, "imdb_count", as_num=True), reverse=True):
             genres = moviedata.get_value(movie, "list_of_genres")
             if any([g in genres for g in skip_genres]):
                 continue
@@ -99,7 +101,7 @@ def write_movie_csv(outfile, movies, moviedata, desired_colnames=None, skip_genr
             f.write("\n")
 
 
-def manage_movies(inputfile="test.txt", outfile=None, requires_search=False, datafile="movies.json", force_justwatch_update=False):
+def manage_movies(inputfile="test.txt", outfile=None, requires_search=False, datafile="resources/movies.json", force_justwatch_update=False):
     """
     For each line in the inputfile, fetch all the various data for it, save that, and make a csv.
     This function is long because it's responsible for minimizing the number of outgoing calls.
@@ -147,6 +149,8 @@ def manage_movies(inputfile="test.txt", outfile=None, requires_search=False, dat
             except Exception as e:
                 print(f"Unknown exception, probably a timeout: {e}")
                 continue
+            except KeyboardInterrupt:
+                break
             finally:
                 data.save()
 
@@ -163,7 +167,7 @@ if __name__ == "__main__":
 
     parser.add_argument("file", nargs="?", type=str, help="Input filepath")
     parser.add_argument("outfile", nargs="?", type=str, help="Output filepath")
-    parser.add_argument("-j", "--datafile", type=str, default="movies.json", help="Database file to use/create")
+    parser.add_argument("-j", "--datafile", type=str, default="resources/movies.json", help="Database file to use/create")
     parser.add_argument("-d", "--delete", type=str, help="Querystring to delete from the database")
     parser.add_argument("-f", "--justwatch", action="store_true", help="Flag to force redownload all Justwatch data")
     parser.add_argument("-w", "--handwritten", action="store_true", help="Flag to use imdb search (when queries are not taken from letterboxd)")

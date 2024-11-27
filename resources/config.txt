@@ -1,0 +1,9 @@
+{
+	"desired_colnames": ["year", "title", "runtime", "imdb_rating", "letterboxd_rating",
+                        "list_of_actors", "content_warning_dict",
+                        "justwatch_free", "justwatch_rent",
+                        "imdb_count", "letterboxd_count", "list_of_genres", "plot", "kind"],
+
+	"skip_genres": ["Short"]
+							
+							}
