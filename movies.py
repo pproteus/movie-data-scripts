@@ -5,7 +5,7 @@ import imdb_fetcher
 
 
 class Data:
-    def __init__(self, filepath="resources/movies.json"):
+    def __init__(self, filepath="resources/movies.json", configpath="resources/config.json"):
         self.filepath = filepath
         if not os.path.exists(self.filepath):
             with open(filepath, "w") as f:
@@ -15,12 +15,11 @@ class Data:
             with open(filepath, "r") as f:
                 j = json.load(f)
                 self.data = {k: imdb_fetcher.Movie(**v) for k, v in j.items()}
-        CONFIG_PATH = "resources/config.txt"
         try:
-            with open(CONFIG_PATH, "r") as f:
+            with open(configpath, "r") as f:
                 self.config = json.load(f)
         except (UnboundLocalError, json.decoder.JSONDecodeError):
-            raise UnboundLocalError(f'File "{CONFIG_PATH}" is supposed to be a json but is malformed.')
+            raise UnboundLocalError(f'File "{configpath}" is supposed to be a json but is malformed.')
 
     def save(self):
         with open(self.filepath, "w") as f:
@@ -83,11 +82,14 @@ class Data:
 def write_movie_csv(outfile, queries, moviedata: Data):
     """Function that manages creating/formatting the csv, assuming you have all the data already."""
     with open(outfile, 'w', newline='', encoding='utf-8') as f:
-        skip_genres = moviedata.config["skip_genres"]
+        skip_genres = moviedata.config.get("skip_genres", [])
         desired_colnames = moviedata.config["desired_colnames"]
 
         for col in desired_colnames:
-            f.write(moviedata.get_label(col))
+            try:
+                f.write(moviedata.get_label(col))
+            except AttributeError:
+                f.write(col)
             f.write("\t")
         f.write("\n")
 
@@ -96,18 +98,24 @@ def write_movie_csv(outfile, queries, moviedata: Data):
             if any([g in genres for g in skip_genres]):
                 continue
             for col in desired_colnames:
-                f.write(str(moviedata.get_value(movie, col, formatted=True)))
+                try:
+                    f.write(str(moviedata.get_value(movie, col, formatted=True)))
+                except AttributeError:
+                    f.write("")
                 f.write("\t")
             f.write("\n")
+    print(f"{outfile} created successfully")
 
 
-def manage_movies(inputfile="test.txt", outfile=None, requires_search=False, datafile="resources/movies.json", force_justwatch_update=False):
+def manage_movies(inputfile="test.txt", outfile=None, requires_search=False, 
+                  datafile="resources/movies.json", configfile="resources/config.json", 
+                  force_justwatch_update=False, no_search=False):
     """
     For each line in the inputfile, fetch all the various data for it, save that, and make a csv.
     This function is long because it's responsible for minimizing the number of outgoing calls.
     Networking errors should be handled gracefully by simply moving on to the next thing.
     """
-    data = Data(datafile)
+    data = Data(datafile, configfile)
     with open(inputfile, "r") as f:
         queries = [line.rstrip("\n").lower() for line in f]    # preprocessing
         for query in queries:
@@ -118,30 +126,35 @@ def manage_movies(inputfile="test.txt", outfile=None, requires_search=False, dat
             try:
                 if query[:23] == "https://letterboxd.com/":    # we can fetch the ID directly without guessing
                     if data.get_value(query, "imdb_id") == "" or data.get_value(query, "letterboxd_count") == "":
-                        data.add_info(query, imdb_fetcher.fetch_letterboxd(query))
+                        if not no_search:
+                            data.add_info(query, imdb_fetcher.fetch_letterboxd(query))
 
                 elif not requires_search:    # in this case, the query is the letterboxd string
                     if data.get_value(query, "imdb_id") == "" or data.get_value(query, "letterboxd_count") == "":
-                        data.add_info(query, imdb_fetcher.fetch_letterboxd_from_page_string(query))
+                        if not no_search:
+                            data.add_info(query, imdb_fetcher.fetch_letterboxd_from_page_string(query))
 
                 imdb_id = data.get_value(query, "imdb_id")
                 if imdb_id == "":      # then we probably need a search
                     raise NotImplementedError("No search function implemented")
 
                 if data.get_value(query, "imdb_count") == "":
-                    data.add_info(query, imdb_fetcher.fetch_imdb(imdb_id))
+                    if not no_search:
+                        data.add_info(query, imdb_fetcher.fetch_imdb(imdb_id))
 
                 if data.get_value(query, "letterboxd_count") == "":
-                    data.add_info(query, imdb_fetcher.fetch_letterboxd_from_imdb_id(imdb_id))
+                    if not no_search:
+                        data.add_info(query, imdb_fetcher.fetch_letterboxd_from_imdb_id(imdb_id))
 
                 if force_justwatch_update or data.get_value(query, "justwatch_rent") == "":
-                    justwatch_url = data.get_value(query, "justwatch_url")
-                    if justwatch_url == "":   # then we have to make an extra call to fetch it
-                        letterboxd_url = data.get_value(query, "letterboxd_url")
-                        data.add_info(query, imdb_fetcher.fetch_justwatch_url_from_letterboxd(letterboxd_url))
+                    if not no_search:
                         justwatch_url = data.get_value(query, "justwatch_url")
-                    if justwatch_url not in ("", "https://www.justwatch.com/"):     # the former means the url fetcher failed, the latter means it returned nothing
-                        data.add_info(query, imdb_fetcher.fetch_justwatch(justwatch_url))
+                        if justwatch_url == "":   # then we have to make an extra call to fetch it
+                            letterboxd_url = data.get_value(query, "letterboxd_url")
+                            data.add_info(query, imdb_fetcher.fetch_justwatch_url_from_letterboxd(letterboxd_url))
+                            justwatch_url = data.get_value(query, "justwatch_url")
+                        if justwatch_url not in ("", "https://www.justwatch.com/"):     # the former means the url fetcher failed, the latter means it returned nothing
+                            data.add_info(query, imdb_fetcher.fetch_justwatch(justwatch_url))
 
             except imdb_fetcher.MovieNotFoundException as e:
                 print(f"Error: {e} not found.")
@@ -168,8 +181,10 @@ if __name__ == "__main__":
     parser.add_argument("file", nargs="?", type=str, help="Input filepath")
     parser.add_argument("outfile", nargs="?", type=str, help="Output filepath")
     parser.add_argument("-j", "--datafile", type=str, default="resources/movies.json", help="Database file to use/create")
+    parser.add_argument("-c", "--configfile", type=str, default="resources/config.json", help="JSON with formatting options")
     parser.add_argument("-d", "--delete", type=str, help="Querystring to delete from the database")
     parser.add_argument("-f", "--justwatch", action="store_true", help="Flag to force redownload all Justwatch data")
+    parser.add_argument("-n", "--no_search", action="store_true", help="Flag to prevent any new downloads (only use what's in the json already)")
     parser.add_argument("-w", "--handwritten", action="store_true", help="Flag to use imdb search (when queries are not taken from letterboxd)")
 
     args = parser.parse_args()
@@ -183,8 +198,8 @@ if __name__ == "__main__":
             args.outfile = input("Output filepath:  ")
             args.handwritten = input("Type 'h' if list is handwritten, or anything else to continue  ").lower() == "h"
         if args.outfile is None or len(args.outfile) < 2:
-            manage_movies(args.file, requires_search=args.handwritten,
-                          datafile=args.datafile, force_justwatch_update=args.justwatch)
+            manage_movies(args.file, requires_search=args.handwritten, datafile=args.datafile, 
+                          configfile=args.configfile, force_justwatch_update=args.justwatch, no_search=args.no_search)
         else:
-            manage_movies(args.file, args.outfile, requires_search=args.handwritten,
-                          datafile=args.datafile, force_justwatch_update=args.justwatch)
+            manage_movies(args.file, args.outfile, requires_search=args.handwritten, datafile=args.datafile, 
+                          configfile=args.configfile, force_justwatch_update=args.justwatch, no_search=args.no_search)
