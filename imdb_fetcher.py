@@ -104,11 +104,12 @@ def fetch_imdb(imdb_id):
 
     runtime = data["runtime"]["seconds"]//60 if data["runtime"] is not None else None
     plot = data["plot"]["plotText"]["plainText"] if data["plot"] is not None else None
+    list_of_genres = [g["genre"]["text"] for g in data["titleGenres"]["genres"]] if data["titleGenres"] is not None else []
 
     return Movie(content_warning_dict={cat["category"]["id"]: {level["text"]: level["votedFor"] for level in cat["severityBreakdown"]}
                                        for cat in data["parentsGuide"]["categories"]},
                  runtime=runtime, imdb_rating=data["ratingsSummary"]["aggregateRating"],
-                 imdb_count=data["ratingsSummary"]["voteCount"], list_of_genres=[g["genre"]["text"] for g in data["titleGenres"]["genres"]],
+                 imdb_count=data["ratingsSummary"]["voteCount"], list_of_genres=list_of_genres,
                  kind=data["titleType"]["text"], title=data["titleText"]["text"], year=data["releaseYear"]["year"],
                  plot=plot, director=data["directorsPageTitle"][0]["credits"][0]["name"]["nameText"]["text"],
                  list_of_actors=[person["node"]["name"]["nameText"]["text"] for person in data["castPageTitle"]["edges"]])
@@ -120,11 +121,10 @@ def fetch_letterboxd(letterboxd_url):
     for i, line in enumerate(lines):
         if "<![CDATA[" in line:
             info_line = lines[i+1]
-        if "var filmData" in line:
+        if '&nbsp;mins' in line:
             runtime_line = line
         if "www.imdb.com" in line:
             imdb_line = line
-    imdb_id = re.findall(r"tt(\d+)", imdb_line)[0]
     try:
         info = json.loads(info_line)
     except UnboundLocalError:
@@ -132,14 +132,16 @@ def fetch_letterboxd(letterboxd_url):
         # this page will not be a proper movie page, but letterboxd may still handle it
         # but there's not going to be proper data here so we have to stop.
         raise MovieNotFoundException("Hint: Are you sure this input list wasn't handwritten?")
+    imdb_id = re.findall(r"tt(\d+)", imdb_line)[0]
 
-    runtime = int(re.findall(r"runTime: (\d+)", runtime_line)[0])
+    runtime = int(re.findall(r"(\d+)&nbsp;mins", runtime_line)[0])
     rating = info["aggregateRating"]["ratingValue"] if "aggregateRating" in info else None
     count = info["aggregateRating"]["ratingCount"] if "aggregateRating" in info else 0
     director = info["director"][0]["name"] if "director" in info else None
     actors = [actor["name"] for actor in info["actors"]] if "actors" in info else list()
+    year= int(info["releasedEvent"][0]["startDate"]) if "releasedEvent" in info else None
 
-    return Movie(title=info["name"], kind=info["@type"], runtime=runtime, director=director, year=int(info["releasedEvent"][0]["startDate"]),
+    return Movie(title=info["name"], kind=info["@type"], runtime=runtime, director=director, year=year,
                  list_of_actors=actors, list_of_genres=info.get("genre", list()), letterboxd_url=info["@id"],
                  imdb_id=imdb_id, letterboxd_count=count, letterboxd_rating=rating)
 
@@ -183,7 +185,7 @@ def fetch_justwatch(justwatch_url):
         services_line = services_line[services_line.find("Watch Now") : services_line.find("We checked for updates")]
         if "offer__label__text" in services_line:   # (if that's not the case, there's no data, and the regex might take forever to fail)
             # and then separate out each service
-            pattern = 'alt="(.*?)".*?class="offer__icon".*?class="offer__label__text".*?>(.*?)</p>'
+            pattern = 'alt="(.*?)".*?class="offer__label__text".*?>(.*?)</p>'
             service_modality_pairs = re.findall(pattern, services_line)
             for service, modality in service_modality_pairs:
                 if modality in data:
